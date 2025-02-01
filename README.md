@@ -30,7 +30,7 @@ pip install -r requirements.txt
 ```
 
 After attaching the MK3 interface, determine the path of the serial port device
-to include on the command-line. In these examples, it is 'tty.usbserial-HQ2217T743W'
+to include on the command-line. In these examples, it is `tty.usbserial-HQ2217T743W`
 but yours may be different depending on your platform.
 
 ### Monitor the status of an attached device
@@ -45,10 +45,7 @@ python3 cli.py monitor /dev/tty.usbserial-HQ2217T743W
 ### Set the remote switch state and current limit
 
 The following command sets the remote switch state to `on` and the current limit to its maximum.
-
-Note that the remote switch state and current limit persists even after the interface
-has been disconnected or the device is turned off. Use the following command to restore
-the device to its default behavior.
+This is the default setting.
 
 ```
 python3 cli.py control /dev/tty.usbserial-HQ2217T743W on
@@ -61,7 +58,7 @@ and continues monitoring indefinitely.
 python3 cli.py control /dev/tty.usbserial-HQ2217T743W charger_only --current-limit 12.5 --monitor
 ```
 
-The following command activates standby mode and sets the remote switch state to `off` to prevent the
+The following command sets the remote switch state to `off` and activates standby mode and to prevent the
 interface from becoming unresponsive while the device is off. Refer to the standby section for
 more details.
 
@@ -84,6 +81,9 @@ The front panel switch and other inputs on the device may override the remote sw
   will not operate regardless of the remote switch state set by this interface.
 - Other conditions determined by the device may also apply such as constraints on the
   mains voltage and battery state of charge.
+
+The device retains the remote switch state and current limit set by the MK3 interface even after
+it has been disconnected from VE.Bus until the device goes to sleep (assuming it is not on standby).
 
 ### Probe whether a device is attached to the interface and operational
 
