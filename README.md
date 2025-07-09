@@ -14,6 +14,7 @@ on this library.
 
 This library has been tested with the following devices:
 
+- Victron Multiplus
 - Victron Multiplus II
 
 Please inform the author if you test this library with other potentially compatible
@@ -31,7 +32,8 @@ pip install -r requirements.txt
 
 After attaching the MK3 interface, determine the path of the serial port device
 to include on the command-line. In these examples, it is `tty.usbserial-HQ2217T743W`
-but yours may be different depending on your platform.
+but yours may be different depending on your platform.  On Windows, the serial port
+may be `COM1` or something similar.
 
 ### Monitor the status of an attached device
 
@@ -41,6 +43,57 @@ the inverter, and control panel configuration until stopped.
 ```
 python3 cli.py monitor /dev/tty.usbserial-HQ2217T743W
 ```
+
+<details>
+<summary>Example monitor command output</summary>
+
+```
+VersionResponse
+  version: 1170216
+InterfaceResponse
+  flags: PANEL_DETECT|UNDOCUMENTED_04
+LEDResponse
+  on: MAINS|FLOAT
+  blink: OFF
+DCResponse
+  dc_voltage: 13.77
+  dc_current_to_inverter: 0.0
+  dc_current_from_charger: 1.4000000000000001
+  ac_inverter_frequency: 60.09
+ACResponse
+  ac_phase: 1
+  ac_num_phases: 1
+  device_state: STATE_CHARGE
+  ac_mains_voltage: 119.46000000000001
+  ac_mains_current: 1.48
+  ac_inverter_voltage: 119.46000000000001
+  ac_inverter_current: 0.91
+  ac_mains_frequency: 60.31
+ACResponse
+  ac_phase: 2
+  ac_num_phases: 0
+  device_state: STATE_CHARGE
+  ac_mains_voltage: 0.55
+  ac_mains_current: 0.0
+  ac_inverter_voltage: 119.46000000000001
+  ac_inverter_current: 0.0
+  ac_mains_frequency: 60.31
+PowerResponse
+  dc_power: 20
+  ac_mains_power: 40
+  ac_inverter_power: 20
+ConfigResponse
+  last_active_ac_input: 0
+  current_limit_overridden_by_panel: True
+  digital_multi_control_dedicated: False
+  num_ac_inputs: 1
+  remote_panel_detected: True
+  minimum_current_limit: 9.4
+  maximum_current_limit: 50.0
+  actual_current_limit: 50.0
+  switch_register: DIRECT_REMOTE_SWITCH_CHARGE|DIRECT_REMOTE_SWITCH_INVERT|FRONT_SWITCH_UP|SWITCH_CHARGE|SWITCH_INVERT|ONBOARD_REMOTE_SWITCH_INVERT
+```
+</details>
 
 ### Set the remote switch state and current limit
 
@@ -85,6 +138,32 @@ The front panel switch and other inputs on the device may override the remote sw
 The device retains the remote switch state and current limit set by the MK3 interface even after
 it has been disconnected from VE.Bus until the device goes to sleep (assuming it is not on standby).
 
+<details>
+<summary>Example control command output</summary>
+
+```
+Setting switch state to ON and current limit to None amps
+VersionResponse
+  version: 1170216
+StateResponse
+InterfaceResponse
+  flags: PANEL_DETECT
+StateResponse
+ConfigResponse
+  last_active_ac_input: 0
+  current_limit_overridden_by_panel: True
+  digital_multi_control_dedicated: False
+  num_ac_inputs: 1
+  remote_panel_detected: True
+  minimum_current_limit: 0.0
+  maximum_current_limit: 50.0
+  actual_current_limit: 30.0
+  switch_register: DIRECT_REMOTE_SWITCH_CHARGE|FRONT_SWITCH_UP|SWITCH_CHARGE|ONBOARD_REMOTE_SWITCH_INVERT
+VersionResponse
+  version: 1170216
+```
+</details>
+
 ### Probe whether a device is attached to the interface and operational
 
 The following command attempts to connect to a device using the interface and reports whether
@@ -93,6 +172,14 @@ it is operational or the reason it was unable to connect.
 ```
 python3 cli.py probe /dev/tty.usbserial-HQ2217T743W
 ```
+
+<details>
+<summary>Example probe command output</summary>
+
+```
+Result: OK
+```
+</details>
 
 ## Standby
 
@@ -119,3 +206,41 @@ the AC mains to wake it up. Try sending the command again and consider enabling 
 pip install setuptools build
 python3 -m build
 ```
+
+## Troubleshooting
+
+Here are some things to try if the MK3 interface appears to be having difficulties communicating with your inverter:
+
+- Unplug the MK3 from your computer's USB port and from the device's VE.Bus, plug it back in, and try again.
+- Check whether your device is remotely turned off and sleeping.  Consider enabling [standby](#standby) mode.
+- If there are additional peripherals plugged into your device's VE.Bus ports, try unplugging them to check for conflicts with the MK3 interface.
+- If you just operated your MK3 interface with a different program such as the Victron Connect app, the interface may have been left in a state that this library doesn't know how to handle.  Quit the other program, unplug the MK3 from VE.Bus to reset it, plug it back in, and try again.
+
+## References
+
+This library implements the MK2/MK3 protocol according to the following references.
+
+Victron documentation: [Interfacing with VE.Bus products – MK2 Protocol](https://www.victronenergy.com/upload/documents/Technical-Information-Interfacing-with-VE-Bus-products-MK2-Protocol-3-14.pdf)
+
+Victron community [forum post](https://community.victronenergy.com/questions/1096/mk3-usb-s-state-command-does-not-change-panel-swit.html) about how to control standby mode:
+
+> For the MK3 the jumpers were replaced by software control of the VE.Bus standby and panel detect lines.
+> Unfortunately this was not mentioned in the "Interfacing with VE.Bus products - MK2 Protocol" documentation.
+> We will add it.
+>
+> To get you going, here is the command description.
+>
+> Command: 'H' \<Line state\>
+>
+> Reply: 'H' \<Line state\>
+>
+> \<Line state\> is specified as follows. Setting a bit pulls the line to GND
+>
+> | Bit number | Meaning      |
+> | ---------- | ------------ |
+> |          0 | Panel detect |
+> |          1 | Standby      |
+>
+> The above command is supported by the MK3 only.
+> Please note that the MK3 chip in the USB dongle is powered through the VE.Bus, when loosing VE.Bus power
+> the above lines will become floating again.

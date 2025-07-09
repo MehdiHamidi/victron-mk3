@@ -1,28 +1,4 @@
-# Implementation of MK2/MK3 protocol based on the following documentation provided by Victron:
-# https://www.victronenergy.com/upload/documents/Technical-Information-Interfacing-with-VE-Bus-products-MK2-Protocol-3-14.pdf
-#
-# Extra information from:
-# https://community.victronenergy.com/questions/1096/mk3-usb-s-state-command-does-not-change-panel-swit.html
-#
-# For the MK3 the jumpers were replaced by software control of the VE.Bus standby and panel detect lines.
-# Unfortunately this was not mentioned in the "Interfacing with VE.Bus products - MK2 Protocol" documentation.
-# We will add it.
-#
-# To get you going, here is the command description.
-#
-# Command: 'H' <Line state>
-# Reply: 'H' <Line sate>
-#
-# <Line state> is specified as follows. Setting a bit pulls the line to GND
-#
-# Bit number    Meaning
-#   0           Panel detect
-#   1           Standby
-#
-# The above command is supported by the MK3 only.
-# Please note that the MK3 chip in the USB dongle is powered through the VE.Bus, when loosing VE.Bus power
-# the above lines will become floating again.
-#
+# Implementation of MK2/MK3 protocol based on Victron documentation
 import asyncio
 from enum import Enum, IntEnum, IntFlag
 import logging
