@@ -381,12 +381,26 @@ class _VictronMK3Driver:
             finally:
                 ready.set()
 
-            # There seems to be no need to reset the interface and doing so tends to cause
-            # unpredictable delays in resuming communication.
+            # Reset the interface
+            #
+            # Omitted the reset because it causes unpredictable delays in resuming communication and doesn't
+            # seem necessary for reliable operation.  Keeping the code in case it proves useful later on.
             # self._send_frame("R", [])
             # await asyncio.sleep(2)
 
+            # Prime the interface by requesting the version
             self._send_frame("V", [])
+
+            # Configure the interface for Winmon mode 1 with short frames (default flags)
+            #
+            # If the MK3 was previously plugged into a PC running Victron Connect without being unplugged
+            # from VE.Bus, then the VE.Bus interface may still be configured to operate in Winmon mode 2
+            # with long frames or with other features enabled that we don't need.  We could take this
+            # opportunity to enable long frames and use them but the flags may be spontaneously lost any time
+            # the VE.Bus interface is disconnected or goes to sleep so it's simpler to rely only on the
+            # interface's default state.  Consequently, it's also fine for this request to be dropped if
+            # the interface happens to be asleep right now.
+            self._send_frame("S", [0x00, 0x00, 0x00, 0x01, 0x90, 0x00, 0x01, 0x00])
             self._populate_next_variable_info()
 
             # Listen for frames until the task is cancelled
