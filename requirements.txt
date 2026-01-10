@@ -1,4 +1,4 @@
 asyncio
 click
 pyserial
-pyserial-asyncio
+pyserial-asyncio-fast

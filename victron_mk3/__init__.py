@@ -3,7 +3,7 @@ import asyncio
 from enum import Enum, IntEnum, IntFlag
 import logging
 import serial
-import serial_asyncio
+import serial_asyncio_fast
 import time
 from typing import Callable, List, Type
 
@@ -369,7 +369,7 @@ class _VictronMK3Driver:
         try:
             # Open the port
             try:
-                reader, self._writer = await serial_asyncio.open_serial_connection(
+                reader, self._writer = await serial_asyncio_fast.open_serial_connection(
                     url=path,
                     baudrate=2400,
                     parity=serial.PARITY_NONE,
