@@ -17,19 +17,20 @@ class StateOfChargeTests(unittest.TestCase):
         driver._variable_id_queue = [13]
         handler = RecordingHandler()
 
-        # RAM variable 13 reports scale 1 and offset 0.
+        # RAM variable 13 reports scale 0.005 and offset 0. A raw value of
+        # 200 therefore represents 1.0, or 100 percent.
         driver._handle_variable_info_response(
             handler,
-            bytes([0xFF, ord("X"), 0x8E, 1, 0, 0x8F, 0, 0]),
+            bytes([0xFF, ord("X"), 0x8E, 0x38, 0x7F, 0x8F, 0, 0]),
         )
         driver._handle_state_of_charge_response(
             handler,
-            bytes([0xFF, ord("Y"), 0x85, 73, 0]),
+            bytes([0xFF, ord("Y"), 0x85, 200, 0]),
         )
 
         self.assertEqual(len(handler.responses), 1)
         self.assertIsInstance(handler.responses[0], StateOfChargeResponse)
-        self.assertEqual(handler.responses[0].state_of_charge, 73)
+        self.assertEqual(handler.responses[0].state_of_charge, 100)
 
     def test_unsupported_state_of_charge_does_not_block_discovery(self) -> None:
         driver = _VictronMK3Driver()

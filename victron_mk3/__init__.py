@@ -560,7 +560,9 @@ class _VictronMK3Driver:
                 self._deliver_response(
                     handler,
                     StateOfChargeResponse(
-                        state_of_charge=variable_info.parse(msg[3:5]),
+                        # RAM variable 13 is encoded as a 0.0-1.0 fraction,
+                        # while the public response is expressed as percent.
+                        state_of_charge=variable_info.parse(msg[3:5]) * 100,
                     ),
                 )
 
