@@ -183,6 +183,11 @@ class PowerResponse(Response):
         self.ac_inverter_power = ac_inverter_power
 
 
+class StateOfChargeResponse(Response):
+    def __init__(self, state_of_charge: float) -> None:
+        self.state_of_charge = state_of_charge
+
+
 class StateResponse(Response):
     def __init__(self) -> None:
         pass
@@ -321,6 +326,18 @@ class VictronMK3:
             return None
         return await self._driver.send_power_request()
 
+    async def send_state_of_charge_request(
+        self,
+    ) -> StateOfChargeResponse | None:
+        """Sends a request for the VE.Bus battery state of charge.
+
+        The device may not provide this value when its battery monitor is not
+        configured. In that case, this method returns None.
+        """
+        if self._driver is None:
+            return None
+        return await self._driver.send_state_of_charge_request()
+
 
 class _VictronMK3Driver:
     # The documentation recommends a 500 ms timeout for most requests.
@@ -359,7 +376,9 @@ class _VictronMK3Driver:
         self._writer: asyncio.StreamWriter = None
         self._w_nonce: int = 0
         self._w_completion: Callable[[bytes], None] = None
-        self._variable_id_queue = [0, 1, 2, 3, 4, 5, 7, 8, 14, 15, 16]
+        # RAM variable 13 is optional, so discover it after the variables needed
+        # by the existing AC/DC/power responses.
+        self._variable_id_queue = [0, 1, 2, 3, 4, 5, 7, 8, 14, 15, 16, 13]
         self._variable_info = {}
         self._variable_info_request_time = None
         self._response_waiters = []
@@ -509,6 +528,17 @@ class _VictronMK3Driver:
             _VictronMK3Driver.REQUEST_TIMEOUT_SECONDS,
         )
 
+    async def send_state_of_charge_request(self) -> StateOfChargeResponse | None:
+        variable_info = self._variable_info.get(13)
+        if variable_info is None:
+            return None
+
+        self._send_w_request([0x30, 13], self._handle_state_of_charge_response)
+        return await self._wait_for_response(
+            StateOfChargeResponse,
+            _VictronMK3Driver.REQUEST_TIMEOUT_SECONDS,
+        )
+
     def _handle_power_response(self, handler: Handler, msg: bytes) -> None:
         if self._ensure_variable_info_available():
             if len(msg) >= 9 and msg[2] == 0x85:
@@ -518,6 +548,19 @@ class _VictronMK3Driver:
                         dc_power=self._variable_info[14].parse(msg[3:5]),
                         ac_mains_power=-self._variable_info[15].parse(msg[5:7]),
                         ac_inverter_power=self._variable_info[16].parse(msg[7:9]),
+                    ),
+                )
+
+    def _handle_state_of_charge_response(
+        self, handler: Handler, msg: bytes
+    ) -> None:
+        if self._ensure_variable_info_available():
+            variable_info = self._variable_info.get(13)
+            if variable_info is not None and len(msg) >= 5 and msg[2] == 0x85:
+                self._deliver_response(
+                    handler,
+                    StateOfChargeResponse(
+                        state_of_charge=variable_info.parse(msg[3:5]),
                     ),
                 )
 
@@ -679,24 +722,40 @@ class _VictronMK3Driver:
 
     def _handle_variable_info_response(self, handler: Handler, msg: bytes) -> None:
         self._variable_info_request_time = None
-        if len(msg) >= 8 and msg[2] == 0x8E and msg[5] == 0x8F:
-            scale = msg[3] | msg[4] << 8
-            signed = False
-            if scale >= 0x8000:
-                scale = 0x10000 - scale
-                signed = True
-            if scale >= 0x4000:
-                scale = 1 / (0x8000 - scale)
-            offset = msg[6] | msg[7] << 8
-            if offset >= 0x8000:
-                offset -= 0x10000
-            id = self._variable_id_queue.pop(0)
-            if HACK_OVERRIDE_AC_INVERTER_CURRENT_SIGNEDNESS and id == 3:
-                signed = True
-            self._variable_info[id] = _VictronMK3Driver.VariableInfo(
-                signed, scale, offset
-            )
+        if not self._variable_id_queue or len(msg) < 5 or msg[2] != 0x8E:
+            return
+
+        scale = msg[3] | msg[4] << 8
+        id = self._variable_id_queue[0]
+
+        # A zero scale means the device does not support this optional RAM
+        # variable. The protocol omits the offset response in that case.
+        if id == 13 and scale == 0:
+            self._variable_id_queue.pop(0)
+            self._variable_info[id] = None
             self._populate_next_variable_info()
+            return
+
+        if len(msg) < 8 or msg[5] != 0x8F:
+            return
+
+        self._variable_id_queue.pop(0)
+
+        signed = False
+        if scale >= 0x8000:
+            scale = 0x10000 - scale
+            signed = True
+        if scale >= 0x4000:
+            scale = 1 / (0x8000 - scale)
+        offset = msg[6] | msg[7] << 8
+        if offset >= 0x8000:
+            offset -= 0x10000
+        if HACK_OVERRIDE_AC_INVERTER_CURRENT_SIGNEDNESS and id == 3:
+            signed = True
+        self._variable_info[id] = _VictronMK3Driver.VariableInfo(
+            signed, scale, offset
+        )
+        self._populate_next_variable_info()
 
     def _send_w_request(
         self, msg: bytes, completion: Callable[[Handler, bytes], None]
