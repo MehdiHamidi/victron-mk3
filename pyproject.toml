@@ -10,7 +10,7 @@ description = "A Python library for communicating with certain Victron charger a
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-version = "0.7.0"
+version = "0.8.0"
 # The library uses PEP 604 unions in annotations that are evaluated at runtime.
 requires-python = ">=3.10"
 dependencies = [
