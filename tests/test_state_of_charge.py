@@ -181,7 +181,6 @@ class StateOfChargeTests(unittest.TestCase):
 
     def test_responses_are_withheld_until_discovery_completes(self) -> None:
         driver = _VictronMK3Driver()
-        handler = RecordingHandler()
         capture_frames(driver)
 
         # Discovery is still outstanding, so nothing can be decoded yet.
