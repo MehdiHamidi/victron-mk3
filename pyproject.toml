@@ -1,14 +1,29 @@
 [build-system]
-requires = ["setuptools"]
+# PEP 639 license metadata requires setuptools 77 or newer.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "victron_mk3"
 authors = [ { name = "Jeff Brown" } ]
 description = "A Python library for communicating with certain Victron charger and inverter devices that have VE.Bus ports using the Victron Interface MK3-USB (VE.Bus to USB)."
-version = "0.6.0"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+version = "0.7.0"
+# The library uses PEP 604 unions in annotations that are evaluated at runtime.
+requires-python = ">=3.10"
 dependencies = [
-    "asyncio",
-    "pyserial",
-    "pyserial-asyncio-fast",
+    "pyserial>=3.5",
+    "pyserial-asyncio-fast>=0.11",
 ]
+
+[project.optional-dependencies]
+cli = ["click>=8.1"]
+
+[project.urls]
+Homepage = "https://github.com/MehdiHamidi/victron-mk3"
+Issues = "https://github.com/MehdiHamidi/victron-mk3/issues"
+
+[tool.setuptools]
+packages = ["victron_mk3"]

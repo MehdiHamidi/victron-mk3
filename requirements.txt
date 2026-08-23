@@ -1,4 +1,3 @@
-asyncio
 click
 pyserial
 pyserial-asyncio-fast
