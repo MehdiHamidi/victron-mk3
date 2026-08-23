@@ -177,10 +177,14 @@ class PowerResponse(Response):
         dc_power: float,
         ac_mains_power: float,
         ac_inverter_power: float,
+        state_of_charge: float | None = None,
     ) -> None:
         self.dc_power = dc_power
         self.ac_mains_power = ac_mains_power
         self.ac_inverter_power = ac_inverter_power
+        self.state_of_charge = state_of_charge
+        """Battery state of charge as a percentage, when the device reports it and
+        it was read as part of the same command. See VictronMK3.send_power_request."""
 
 
 class StateOfChargeResponse(Response):
@@ -343,6 +347,10 @@ class _VictronMK3Driver:
     # The documentation recommends a 500 ms timeout for most requests.
     REQUEST_TIMEOUT_SECONDS = 0.5
 
+    # RAM variables that every response other than the state of charge depends on.
+    # A device that does not report one of these cannot be decoded at all.
+    REQUIRED_VARIABLE_IDS = (0, 1, 2, 3, 4, 5, 7, 8, 14, 15, 16)
+
     # The documentation says that 'F' 5 can take longer and recommends using a timeout greater than 750 ms.
     REQUEST_TIMEOUT_SECONDS_FOR_CONFIG = 1
 
@@ -380,6 +388,13 @@ class _VictronMK3Driver:
         # by the existing AC/DC/power responses.
         self._variable_id_queue = [0, 1, 2, 3, 4, 5, 7, 8, 14, 15, 16, 13]
         self._variable_info = {}
+        # CommandReadRAMVar accepts up to six RAM IDs per command so the state of
+        # charge normally rides along with the power variables instead of costing a
+        # second round-trip. Some interfaces truncate the longer reply in Winmon
+        # mode 1, so fall back to a separate command if that happens.
+        self._combined_state_of_charge_read = True
+        self._power_request_ids = []
+        self._state_of_charge = None
         self._variable_info_request_time = None
         self._response_waiters = []
 
@@ -522,16 +537,28 @@ class _VictronMK3Driver:
         )
 
     async def send_power_request(self) -> PowerResponse:
-        self._send_w_request([0x30, 14, 15, 16], self._handle_power_response)
+        ids = [14, 15, 16]
+        if (
+            self._combined_state_of_charge_read
+            and self._variable_info.get(13) is not None
+        ):
+            ids.append(13)
+        self._power_request_ids = ids
+        self._send_w_request([0x30] + ids, self._handle_power_response)
         return await self._wait_for_response(
             PowerResponse,
             _VictronMK3Driver.REQUEST_TIMEOUT_SECONDS,
         )
 
     async def send_state_of_charge_request(self) -> StateOfChargeResponse | None:
-        variable_info = self._variable_info.get(13)
-        if variable_info is None:
+        if self._variable_info.get(13) is None:
             return None
+
+        if self._combined_state_of_charge_read:
+            # Already read as part of the most recent power request.
+            if self._state_of_charge is None:
+                return None
+            return StateOfChargeResponse(state_of_charge=self._state_of_charge)
 
         self._send_w_request([0x30, 13], self._handle_state_of_charge_response)
         return await self._wait_for_response(
@@ -540,31 +567,86 @@ class _VictronMK3Driver:
         )
 
     def _handle_power_response(self, handler: Handler, msg: bytes) -> None:
-        if self._ensure_variable_info_available():
-            if len(msg) >= 9 and msg[2] == 0x85:
-                self._deliver_response(
-                    handler,
-                    PowerResponse(
-                        dc_power=self._variable_info[14].parse(msg[3:5]),
-                        ac_mains_power=-self._variable_info[15].parse(msg[5:7]),
-                        ac_inverter_power=self._variable_info[16].parse(msg[7:9]),
-                    ),
-                )
+        if not self._ensure_variable_info_available() or len(msg) < 3:
+            return
+
+        if msg[2] == 0x90:
+            # The state of charge is the only optional variable in this request, so
+            # it must be the one the device is refusing to report.
+            self._mark_state_of_charge_unsupported()
+            return
+        if msg[2] != 0x85:
+            return
+
+        want_state_of_charge = 13 in self._power_request_ids
+        if want_state_of_charge and len(msg) < 11:
+            self._disable_combined_state_of_charge_read(
+                "the interface truncated the reply"
+            )
+            want_state_of_charge = False
+        if len(msg) < 9:
+            return
+
+        state_of_charge = (
+            self._parse_state_of_charge(msg[9:11]) if want_state_of_charge else None
+        )
+        if state_of_charge is not None:
+            self._state_of_charge = state_of_charge
+
+        self._deliver_response(
+            handler,
+            PowerResponse(
+                dc_power=self._variable_info[14].parse(msg[3:5]),
+                ac_mains_power=-self._variable_info[15].parse(msg[5:7]),
+                ac_inverter_power=self._variable_info[16].parse(msg[7:9]),
+                state_of_charge=state_of_charge,
+            ),
+        )
+        if state_of_charge is not None:
+            self._deliver_response(
+                handler, StateOfChargeResponse(state_of_charge=state_of_charge)
+            )
 
     def _handle_state_of_charge_response(
         self, handler: Handler, msg: bytes
     ) -> None:
-        if self._ensure_variable_info_available():
-            variable_info = self._variable_info.get(13)
-            if variable_info is not None and len(msg) >= 5 and msg[2] == 0x85:
-                self._deliver_response(
-                    handler,
-                    StateOfChargeResponse(
-                        # RAM variable 13 is encoded as a 0.0-1.0 fraction,
-                        # while the public response is expressed as percent.
-                        state_of_charge=variable_info.parse(msg[3:5]) * 100,
-                    ),
-                )
+        if not self._ensure_variable_info_available() or len(msg) < 3:
+            return
+
+        if msg[2] == 0x90:
+            self._mark_state_of_charge_unsupported()
+            return
+        if len(msg) < 5 or msg[2] != 0x85:
+            return
+
+        state_of_charge = self._parse_state_of_charge(msg[3:5])
+        if state_of_charge is not None:
+            self._state_of_charge = state_of_charge
+            self._deliver_response(
+                handler, StateOfChargeResponse(state_of_charge=state_of_charge)
+            )
+
+    def _parse_state_of_charge(self, raw: bytes) -> float | None:
+        variable_info = self._variable_info.get(13)
+        if variable_info is None:
+            return None
+        # RAM variable 13 is encoded as a 0.0-1.0 fraction, while the public
+        # response is expressed as percent.
+        return variable_info.parse(raw) * 100
+
+    def _disable_combined_state_of_charge_read(self, reason: str) -> None:
+        if self._combined_state_of_charge_read:
+            logger.debug(
+                f"Reading the state of charge separately from the power variables because {reason}"
+            )
+            self._combined_state_of_charge_read = False
+
+    def _mark_state_of_charge_unsupported(self) -> None:
+        self._disable_combined_state_of_charge_read(
+            "the device reported RAM variable 13 as unsupported"
+        )
+        self._variable_info[13] = None
+        self._state_of_charge = None
 
     def _send_frame(self, command: int, data: List[int]) -> None:
         msg = bytearray(len(data) + 4)
@@ -695,10 +777,15 @@ class _VictronMK3Driver:
         handler.on_response(response)
 
     def _ensure_variable_info_available(self) -> bool:
-        if len(self._variable_id_queue) == 0:
-            return True
-        self._populate_next_variable_info()
-        return False
+        if len(self._variable_id_queue) != 0:
+            self._populate_next_variable_info()
+            return False
+        # A device may report a variable as unsupported. Decoding a response that
+        # depends on one would be meaningless, so report nothing at all instead.
+        return all(
+            self._variable_info.get(id) is not None
+            for id in _VictronMK3Driver.REQUIRED_VARIABLE_IDS
+        )
 
     def _populate_next_variable_info(self) -> None:
         if len(self._variable_id_queue) == 0:
@@ -730,9 +817,9 @@ class _VictronMK3Driver:
         scale = msg[3] | msg[4] << 8
         id = self._variable_id_queue[0]
 
-        # A zero scale means the device does not support this optional RAM
-        # variable. The protocol omits the offset response in that case.
-        if id == 13 and scale == 0:
+        # A zero scale means the device does not support this RAM variable.
+        # The protocol omits the offset response in that case.
+        if scale == 0:
             self._variable_id_queue.pop(0)
             self._variable_info[id] = None
             self._populate_next_variable_info()
